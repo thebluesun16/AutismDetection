@@ -24,20 +24,54 @@ q10 = st.radio("10. I find it difficult to make new friends.", ('No', 'Yes'))
 
 age = st.number_input("Age", min_value=5, max_value=100, value=30)
 gender = st.radio("Gender", ["Male", "Female"])
+# User-friendly country select
+country_options = {
+    "India": 52,
+    "United States": 1,
+    "Canada": 30,
+    "UK": 51,
+    "Australia": 12,
+    "Other": 0
+}
+country_label = st.selectbox("Country of residence", list(country_options.keys()))
+country_of_res = country_options[country_label]
 
-# Data Processing: Encode answers and categorical features as required by your model
-def yesno(val): return 1 if val == 'Yes' else 0
+# User-friendly relation select
+relation_options = {
+    "Self": 1,
+    "Parent": 2,
+    "Relative": 3,
+    "Health professional": 4,
+    "Other": 0
+}
+relation_label = st.selectbox("Relation (who is answering?)", list(relation_options.keys()))
+relation_code = relation_options[relation_label]
 
-answers = [
-    yesno(q1), yesno(q2), yesno(q3), yesno(q4), yesno(q5),
-    yesno(q6), yesno(q7), yesno(q8), yesno(q9), yesno(q10),
-    age,
-    1 if gender == "Male" else 0
-]
+ethnicity = st.number_input("Ethnicity (enter code)", min_value=0, max_value=20, value=0)
+jaundice = st.radio("Jaundice (Yes/No)", ["No", "Yes"])
+austim = st.radio("Family history of autism (austim)", ["No", "Yes"])
+
+# ENGINEERED FEATURES
+total_A_score = sum(a_scores)
+mean_A_score = np.mean(a_scores)
+std_A_score = np.std(a_scores)
+A_score_high_flag = 1 if total_A_score >= 6 else 0
+
+answers = (
+    a_scores
+    + [age]
+    + [1 if gender == "Male" else 0]
+    + [int(ethnicity)]
+    + [1 if jaundice == "Yes" else 0]
+    + [1 if austim == "Yes" else 0]
+    + [country_of_res]
+    + [relation_code]
+    + [total_A_score, mean_A_score, std_A_score, A_score_high_flag]
+)
+
 data = np.array([answers])
 data_scaled = scaler.transform(data)
 
 if st.button("Predict"):
     pred = rf.predict(data_scaled)[0]
     st.write("Prediction (1=ASD, 0=No ASD):", int(pred))
-    st.info("This is not medical advice—just a demonstration AI model.")
