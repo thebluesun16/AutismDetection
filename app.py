@@ -34,7 +34,7 @@ country_options = {
     "Other": 0
 }
 country_label = st.selectbox("Country of residence", list(country_options.keys()))
-country_of_res = country_options[country_label]
+contry_of_res = country_options[country_label]
 
 # User-friendly relation select
 relation_options = {
@@ -45,7 +45,7 @@ relation_options = {
     "Other": 0
 }
 relation_label = st.selectbox("Relation (who is answering?)", list(relation_options.keys()))
-relation_code = relation_options[relation_label]
+relation= relation_options[relation_label]
 
 ethnicity = st.number_input("Ethnicity (enter code)", min_value=0, max_value=20, value=0)
 jaundice = st.radio("Jaundice (Yes/No)", ["No", "Yes"])
@@ -64,8 +64,8 @@ answers = (
     + [int(ethnicity)]
     + [1 if jaundice == "Yes" else 0]
     + [1 if austim == "Yes" else 0]
-    + [country_of_res]
-    + [relation_code]
+    + [contry_of_res]
+    + [relation]
     + [total_A_score, mean_A_score, std_A_score, A_score_high_flag]
 )
 
