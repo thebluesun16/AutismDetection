@@ -3,8 +3,8 @@ import numpy as np
 import joblib
 
 # Load model and scaler
-rf = joblib.load('rf_model.pkl')
-scaler = joblib.load('scaler.pkl')
+rf = joblib.load('rf_model(1).pkl')
+scaler = joblib.load('scaler(1).pkl')
 
 st.title("Autism Screening Prediction (Demo)")
 
