@@ -51,16 +51,17 @@ relation = relation_options[relation_label]
 
 ethnicity_options = {
     "Unknown": 0,
-    "Ethnicity 1": 1,
-    "Ethnicity 2": 2,
-    "Ethnicity 3": 3,
-    "Ethnicity 4": 4,
-    "Ethnicity 5": 5,
-    "Ethnicity 6": 6,
-    "Ethnicity 7": 7,
-    "Ethnicity 8": 8,
-    "Ethnicity 9": 9,
-    "Ethnicity 10": 10
+    "White-European": 1,
+    "Middle Eastern": 2,
+    "Pasifika": 3,
+    "Black": 4,
+    "Others": 5,
+    "Hispanic": 6,
+    "Asian": 7,
+    "Turkish": 8,
+    "South Asian": 9,
+    "Latino": 10,
+    "others": 11
 }
 
 ethnicity_label = st.selectbox("Ethnicity", list(ethnicity_options.keys()))
