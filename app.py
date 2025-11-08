@@ -49,7 +49,22 @@ relation_options = {
 relation_label = st.selectbox("Relation (who is answering?)", list(relation_options.keys()))
 relation = relation_options[relation_label]
 
-ethnicity = st.number_input("Ethnicity (enter code)", min_value=0, max_value=20, value=0)
+ethnicity_options = {
+    "Unknown": 0,
+    "Ethnicity 1": 1,
+    "Ethnicity 2": 2,
+    "Ethnicity 3": 3,
+    "Ethnicity 4": 4,
+    "Ethnicity 5": 5,
+    "Ethnicity 6": 6,
+    "Ethnicity 7": 7,
+    "Ethnicity 8": 8,
+    "Ethnicity 9": 9,
+    "Ethnicity 10": 10
+}
+
+ethnicity_label = st.selectbox("Ethnicity", list(ethnicity_options.keys()))
+ethnicity = ethnicity_options[ethnicity_label]
 jaundice = st.radio("Jaundice (Yes/No)", ["No", "Yes"])
 austim = st.radio("Family history of autism (austim)", ["No", "Yes"])
 
