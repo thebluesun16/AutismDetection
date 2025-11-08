@@ -52,10 +52,15 @@ jaundice = st.radio("Jaundice (Yes/No)", ["No", "Yes"])
 austim = st.radio("Family history of autism (austim)", ["No", "Yes"])
 
 # ENGINEERED FEATURES
+def yesno(val):
+    return 1 if val == "Yes" else 0
+
+a_scores = [yesno(q) for q in [q1, q2, q3, q4, q5, q6, q7, q8, q9, q10]]
 total_A_score = sum(a_scores)
 mean_A_score = np.mean(a_scores)
 std_A_score = np.std(a_scores)
 A_score_high_flag = 1 if total_A_score >= 6 else 0
+
 
 answers = (
     a_scores
