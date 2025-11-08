@@ -7,10 +7,12 @@ rf = joblib.load('rf_model (1).pkl')
 scaler = joblib.load('scaler (1).pkl')
 
 st.title("Autism Screening Prediction (Demo)")
-
 st.header("Answer the following:")
 
-# Real AQ-10 Adult Screening Questions (True=Yes, False=No)
+def yesno(val):
+    return 1 if val == "Yes" else 0
+
+# Collect A1 to A10 scores
 q1 = st.radio("1. I often notice small sounds when others do not.", ('No', 'Yes'))
 q2 = st.radio("2. I usually concentrate more on the whole picture, rather than the small details.", ('No', 'Yes'))
 q3 = st.radio("3. I find it easy to do more than one thing at once.", ('No', 'Yes'))
@@ -22,9 +24,7 @@ q8 = st.radio("8. I like to collect information about categories of things (e.g.
 q9 = st.radio("9. I find it easy to work out what someone is thinking or feeling just by looking at their face.", ('No', 'Yes'))
 q10 = st.radio("10. I find it difficult to make new friends.", ('No', 'Yes'))
 
-age = st.number_input("Age", min_value=5, max_value=100, value=30)
-gender = st.radio("Gender", ["Male", "Female"])
-# User-friendly country select
+# User-friendly dropdowns for country and relation
 country_options = {
     "India": 52,
     "United States": 1,
@@ -36,7 +36,6 @@ country_options = {
 country_label = st.selectbox("Country of residence", list(country_options.keys()))
 contry_of_res = country_options[country_label]
 
-# User-friendly relation select
 relation_options = {
     "Self": 1,
     "Parent": 2,
@@ -45,23 +44,25 @@ relation_options = {
     "Other": 0
 }
 relation_label = st.selectbox("Relation (who is answering?)", list(relation_options.keys()))
-relation= relation_options[relation_label]
+relation = relation_options[relation_label]
 
+# Other fields
+age = st.number_input("Age", min_value=5, max_value=100, value=30)
+gender = st.radio("Gender", ["Male", "Female"])
 ethnicity = st.number_input("Ethnicity (enter code)", min_value=0, max_value=20, value=0)
 jaundice = st.radio("Jaundice (Yes/No)", ["No", "Yes"])
 austim = st.radio("Family history of autism (austim)", ["No", "Yes"])
 
-# ENGINEERED FEATURES
-def yesno(val):
-    return 1 if val == "Yes" else 0
-
+# Define a_scores list properly
 a_scores = [yesno(q) for q in [q1, q2, q3, q4, q5, q6, q7, q8, q9, q10]]
+
+# Engineered features
 total_A_score = sum(a_scores)
 mean_A_score = np.mean(a_scores)
 std_A_score = np.std(a_scores)
 A_score_high_flag = 1 if total_A_score >= 6 else 0
 
-
+# Build feature vector in exact order used in training
 answers = (
     a_scores
     + [age]
@@ -80,3 +81,4 @@ data_scaled = scaler.transform(data)
 if st.button("Predict"):
     pred = rf.predict(data_scaled)[0]
     st.write("Prediction (1=ASD, 0=No ASD):", int(pred))
+    st.info("This is not medical advice—just a demonstration AI model.")
