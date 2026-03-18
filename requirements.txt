@@ -1,5 +1,6 @@
 streamlit
 numpy
-scikit-learn
 joblib
-pandas
+scikit-learn
+opencv-python-headless
+tensorflow-cpu
