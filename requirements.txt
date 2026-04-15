@@ -1,6 +1,6 @@
 streamlit
 numpy
-tensorflow-cpu==2.16.1
+tensorflow-cpu
 scikit-learn
 joblib
 opencv-python-headless
