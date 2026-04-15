@@ -33,24 +33,43 @@ def load_questionnaire_models():
 @st.cache_resource
 def load_video_model():
     """Load the CNN video model trained on SSBD dataset."""
+    import traceback, os
     try:
         import tensorflow as tf
-        model = tf.keras.models.load_model('video_model.h5')
-        le    = joblib.load('video_label_encoder.pkl')
+        try:
+            # Try legacy H5 loader first (handles cross-version issues)
+            model = tf.keras.models.load_model('video_model.h5', compile=False)
+        except Exception:
+            # Fallback: load weights only via custom_objects workaround
+            model = tf.keras.models.load_model(
+                'video_model.h5',
+                compile=False,
+                options=tf.saved_model.LoadOptions(experimental_io_device='/job:localhost')
+            )
+        le = joblib.load('video_label_encoder.pkl')
         return model, le
     except Exception as e:
-        st.warning(f"⚠️ video_model load error: {e}")
+        st.error(f"video_model load FAILED: {traceback.format_exc()}")
         return None, None
 
 @st.cache_resource
 def load_cnnlstm_model():
     """Load the CNN-LSTM temporal model (new — Future Scope)."""
+    import traceback
     try:
         import tensorflow as tf
-        model = tf.keras.models.load_model('cnnlstm_model.h5')
-        le    = joblib.load('cnnlstm_label_encoder.pkl')
+        try:
+            model = tf.keras.models.load_model('cnnlstm_model.h5', compile=False)
+        except Exception:
+            model = tf.keras.models.load_model(
+                'cnnlstm_model.h5',
+                compile=False,
+                options=tf.saved_model.LoadOptions(experimental_io_device='/job:localhost')
+            )
+        le = joblib.load('cnnlstm_label_encoder.pkl')
         return model, le
-    except:
+    except Exception as e:
+        st.error(f"cnnlstm load FAILED: {traceback.format_exc()}")
         return None, None
 
 rf, scaler, _used_smote = load_questionnaire_models()
