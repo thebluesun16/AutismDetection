@@ -23,11 +23,12 @@ st.caption("Research demo — Bharati Vidyapeeth's College of Engineering, New D
 def load_questionnaire_models():
     try:
         rf = joblib.load('rf_model_smote.pkl')
-        st.toast("Using SMOTE-improved Random Forest model ✅")
+        used_smote = True
     except:
         rf = joblib.load('rf_model (1).pkl')
-    scaler = joblib.load('scaler (1).pkl')
-    return rf, scaler
+        used_smote = False
+    scaler = joblib.load('scaler.pkl')
+    return rf, scaler, used_smote
 
 @st.cache_resource
 def load_video_model():
@@ -51,7 +52,9 @@ def load_cnnlstm_model():
     except:
         return None, None
 
-rf, scaler = load_questionnaire_models()
+rf, scaler, _used_smote = load_questionnaire_models()
+if _used_smote:
+    st.toast("Using SMOTE-improved Random Forest model ✅")
 
 
 # ─────────────────────────────────────────
