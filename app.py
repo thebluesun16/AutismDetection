@@ -36,51 +36,47 @@ def load_questionnaire_models():
 def load_video_model():
     """Load the CNN video model trained on SSBD dataset."""
     import traceback
-    try:
-        import tensorflow as tf
-        # Try .keras format first (Keras 3), then .h5
-        keras_path = _model_path('video_model.keras')
-        h5_path    = _model_path('video_model.h5')
+    import tensorflow as tf
 
-        if os.path.exists(keras_path) and os.path.getsize(keras_path) > 1000:
-            model = tf.keras.models.load_model(keras_path, compile=False)
-        elif os.path.exists(h5_path) and os.path.getsize(h5_path) > 1000:
-            model = tf.keras.models.load_model(h5_path, compile=False)
-        else:
-            st.warning("⚠️ **video_model not found or file is corrupt/empty.** "
-                       "Please retrain it from the notebook (Section 6) and re-upload.")
-            return None, None
+    h5_path    = _model_path('video_model.h5')
+    keras_path = _model_path('video_model.keras')
 
-        le = joblib.load(_model_path('video_label_encoder.pkl'))
-        return model, le
-    except Exception as e:
-        st.error(f"video_model load FAILED: {traceback.format_exc()}")
-        return None, None
+    # Try .h5 first (legacy format — most backward-compatible), then .keras
+    for path in [h5_path, keras_path]:
+        if os.path.exists(path) and os.path.getsize(path) > 1000:
+            try:
+                model = tf.keras.models.load_model(path, compile=False)
+                le = joblib.load(_model_path('video_label_encoder.pkl'))
+                return model, le
+            except Exception:
+                continue   # try next format
+
+    st.warning("⚠️ **video_model not found or could not be loaded.** "
+               "Please retrain it from the notebook (Section 6) and re-upload.")
+    return None, None
 
 @st.cache_resource
 def load_cnnlstm_model():
     """Load the CNN-LSTM temporal model (new — Future Scope)."""
     import traceback
-    try:
-        import tensorflow as tf
-        keras_path = _model_path('cnnlstm_model.keras')
-        h5_path    = _model_path('cnnlstm_model.h5')
+    import tensorflow as tf
 
-        # Try .keras format first (Keras 3), fallback to .h5
-        if os.path.exists(keras_path) and os.path.getsize(keras_path) > 1000:
-            model = tf.keras.models.load_model(keras_path, compile=False)
-        elif os.path.exists(h5_path) and os.path.getsize(h5_path) > 1000:
-            model = tf.keras.models.load_model(h5_path, compile=False)
-        else:
-            st.warning("⚠️ **cnnlstm_model not found or file is corrupt/empty.** "
-                       "Please retrain it from the notebook (Section 10) and re-upload.")
-            return None, None
+    h5_path    = _model_path('cnnlstm_model.h5')
+    keras_path = _model_path('cnnlstm_model.keras')
 
-        le = joblib.load(_model_path('cnnlstm_label_encoder.pkl'))
-        return model, le
-    except Exception as e:
-        st.error(f"cnnlstm load FAILED: {traceback.format_exc()}")
-        return None, None
+    # Try .h5 first (legacy format — most backward-compatible), then .keras
+    for path in [h5_path, keras_path]:
+        if os.path.exists(path) and os.path.getsize(path) > 1000:
+            try:
+                model = tf.keras.models.load_model(path, compile=False)
+                le = joblib.load(_model_path('cnnlstm_label_encoder.pkl'))
+                return model, le
+            except Exception:
+                continue   # try next format
+
+    st.warning("⚠️ **cnnlstm_model not found or could not be loaded.** "
+               "Please retrain it from the notebook (Section 10) and re-upload.")
+    return None, None
 
 rf, scaler = load_questionnaire_models()
 
