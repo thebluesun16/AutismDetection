@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 import joblib
-import cv2
 import tempfile
 import os
 
@@ -22,7 +21,6 @@ st.caption("Research demo — Bharati Vidyapeeth's College of Engineering, New D
 # ─────────────────────────────────────────
 @st.cache_resource
 def load_questionnaire_models():
-    # Try to load the SMOTE-improved model first, else fall back to original
     try:
         rf = joblib.load('rf_model_smote.pkl')
         st.toast("Using SMOTE-improved Random Forest model ✅")
@@ -66,6 +64,7 @@ def extract_frames_for_lstm(video_path, seq_len=10, img_size=224):
     Used for the CNN-LSTM model that needs a fixed-length sequence.
     Returns shape: (1, seq_len, 224, 224, 3) or None
     """
+    import cv2  # lazy import
     cap = cv2.VideoCapture(video_path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if total < 5:
@@ -87,14 +86,14 @@ def extract_frames_for_lstm(video_path, seq_len=10, img_size=224):
         return None
 
     arr = np.array(frames[:seq_len], dtype=np.float32) / 255.0
-    return arr[np.newaxis, ...]    # add batch dimension → (1, seq_len, 224, 224, 3)
+    return arr[np.newaxis, ...]    # (1, seq_len, 224, 224, 3)
 
 
 def analyse_face_landmarks_from_frames(frames_rgb):
     """
     Runs MediaPipe face mesh on a list of RGB frames.
     Returns average Eye Aspect Ratio (EAR) and an eye contact assessment.
-    
+
     MediaPipe eye landmark indices:
       Left eye  : 362, 385, 387, 263, 373, 380
       Right eye : 33,  160, 158, 133, 153, 144
@@ -164,17 +163,17 @@ def dsm5_score(a_scores, age, jaundice, family_history):
 
 
 # ─────────────────────────────────────────
-# TABS  (now 3 tabs)
+# TABS
 # ─────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs([
     "📝 Questionnaire Screening",
     "🎥 Video Behavior Analysis",
-    "📷 Real-Time Webcam Detection"   # NEW — Future Scope
+    "📷 Real-Time Webcam Detection"
 ])
 
 
 # ══════════════════════════════════════════
-# TAB 1 — QUESTIONNAIRE  (same as before + DSM-5 score)
+# TAB 1 — QUESTIONNAIRE
 # ══════════════════════════════════════════
 with tab1:
     st.header("Answer the following 10 questions:")
@@ -227,9 +226,9 @@ with tab1:
     jaundice = st.radio("Born with Jaundice?", ["No", "Yes"])
     austim   = st.radio("Family history of autism?", ["No", "Yes"])
 
-    total_A_score    = sum(a_scores)
-    mean_A_score     = np.mean(a_scores)
-    std_A_score      = np.std(a_scores)
+    total_A_score     = sum(a_scores)
+    mean_A_score      = np.mean(a_scores)
+    std_A_score       = np.std(a_scores)
     A_score_high_flag = 1 if total_A_score >= 6 else 0
 
     answers = (
@@ -258,7 +257,6 @@ with tab1:
 
         st.metric("Total AQ Score", total_A_score, help="Score ≥ 6 is associated with ASD traits")
 
-        # ── 🆕 DSM-5 Clinical Validation Score ──
         st.markdown("---")
         st.subheader("🏥 DSM-5 Clinical Alignment Score")
         st.caption("This maps your answers to real DSM-5 diagnostic criteria (research approximation only).")
@@ -277,18 +275,18 @@ with tab1:
 
 
 # ══════════════════════════════════════════
-# TAB 2 — VIDEO ANALYSIS (same as before + CNN-LSTM + MediaPipe)
+# TAB 2 — VIDEO ANALYSIS
 # ══════════════════════════════════════════
 with tab2:
     st.header("Video-Based Behavior Analysis")
     st.markdown("""
     Upload a short video of the individual. Two models analyse the video:
-    
+
     | Model | What it does |
     |---|---|
     | **MobileNetV2** (original) | Classifies each frame separately |
     | **CNN-LSTM** 🆕 | Captures motion patterns across a sequence of frames |
-    
+
     Detected behaviors: 🙌 Arm Flapping | 🤕 Head Banging | 🌀 Spinning
     """)
 
@@ -302,13 +300,13 @@ with tab2:
         st.video(uploaded_video)
         uploaded_video.seek(0)
 
-        video_model, le         = load_video_model()
-        cnnlstm_model, le_lstm  = load_cnnlstm_model()
+        video_model, le        = load_video_model()
+        cnnlstm_model, le_lstm = load_cnnlstm_model()
 
         if video_model is None and cnnlstm_model is None:
             st.warning("""
-            ⚠️ **Video models not found.**  
-            Please train them using the notebook (Sections 6 & 10) and place  
+            ⚠️ **Video models not found.**
+            Please train them using the notebook (Sections 6 & 10) and place
             `video_model.h5`, `cnnlstm_model.h5` and their label encoders alongside this app.
             """)
         else:
@@ -320,12 +318,13 @@ with tab2:
             if st.button("🎬 Analyze Video", use_container_width=True):
                 with st.spinner("Extracting frames and analysing behavior..."):
 
-                    # Save video to a temp file
+                    import cv2  # lazy import
+
                     tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
                     tfile.write(uploaded_video.read())
                     tfile.close()
 
-                    # ─── MobileNetV2 (original frame-by-frame) ───
+                    # ─── MobileNetV2 ───
                     if "MobileNetV2" in model_choice and video_model is not None:
                         cap          = cv2.VideoCapture(tfile.name)
                         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -351,11 +350,11 @@ with tab2:
                             frames_used  = len(frames)
                             class_labels = le.classes_
 
-                    # ─── CNN-LSTM (temporal) ───
+                    # ─── CNN-LSTM ───
                     elif "CNN-LSTM" in model_choice and cnnlstm_model is not None:
                         seq = extract_frames_for_lstm(tfile.name, seq_len=10)
                         if seq is not None:
-                            preds_seq  = cnnlstm_model.predict(seq, verbose=0)   # (1, n_classes)
+                            preds_seq  = cnnlstm_model.predict(seq, verbose=0)
                             avg_probs  = preds_seq[0]
                             pred_idx   = np.argmax(avg_probs)
                             pred_class = le_lstm.inverse_transform([pred_idx])[0]
@@ -384,7 +383,7 @@ with tab2:
                         label = cls.replace('_', ' ').title()
                         st.progress(float(prob), text=f"{label}: {prob*100:.1f}%")
 
-                    # ─── 🆕 MediaPipe Facial Analysis ───
+                    # ─── MediaPipe Facial Analysis ───
                     st.markdown("---")
                     st.subheader("👁️ Facial Landmark Analysis (MediaPipe)")
                     cap2   = cv2.VideoCapture(tfile.name)
@@ -434,10 +433,10 @@ with tab2:
     with st.expander("📥 How to obtain the SSBD video dataset & train the models"):
         st.markdown("""
         **SSBD — Self-Stimulatory Behaviour Dataset**
-        
-        **Step 1 — Get the dataset:**  
+
+        **Step 1 — Get the dataset:**
         Visit https://rolandgoecke.net/research/datasets/ssbd/ and download videos.
-        
+
         **Step 2 — Folder structure:**
         ```
         ssbd_videos/
@@ -445,36 +444,35 @@ with tab2:
           headbanging/   video1.mp4 ...
           spinning/      video1.mp4 ...
         ```
-        
-        **Step 3 — Run the notebook:**  
-        - Section 6 → saves `video_model.h5`  
-        - Section 10 → saves `cnnlstm_model.h5`  
+
+        **Step 3 — Run the notebook:**
+        - Section 6 → saves `video_model.h5`
+        - Section 10 → saves `cnnlstm_model.h5`
         Place all `.h5` and `.pkl` files next to this `app.py`.
         """)
 
 
 # ══════════════════════════════════════════
-# TAB 3 — 🆕 REAL-TIME WEBCAM DETECTION  (Future Scope)
+# TAB 3 — REAL-TIME WEBCAM DETECTION
 # ══════════════════════════════════════════
 with tab3:
     st.header("📷 Real-Time Webcam Detection")
     st.info("""
     **Future Scope Feature** — Capture a photo from your webcam and analyse it instantly.
-    
+
     This uses your device camera to:
     - Detect **facial landmarks** (eye contact, expression) via MediaPipe
     - Run **ASD behavior classification** on the captured frame
     - Show **DSM-5 social domain score** based on facial features
-    
+
     > 💡 For a full video, use the **Video Behavior Analysis** tab.
     """)
 
-    # st.camera_input() is Streamlit's built-in webcam capture widget
-    # It opens the device camera and lets the user take a photo
     webcam_image = st.camera_input("📸 Take a photo for real-time analysis")
 
     if webcam_image is not None:
-        # Read the captured image into a numpy array
+        import cv2  # lazy import
+
         file_bytes = np.asarray(bytearray(webcam_image.read()), dtype=np.uint8)
         img_bgr    = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
         img_rgb    = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -484,7 +482,6 @@ with tab3:
 
         with st.spinner("Analysing the captured image..."):
 
-            # ── MediaPipe facial analysis on single frame ──
             mp_result = analyse_face_landmarks_from_frames([img_rgb])
 
             st.subheader("👁️ Facial Landmark Analysis")
@@ -506,7 +503,6 @@ with tab3:
                     st.success(f"✅ **{mp_result['assessment']}**  \n"
                                "Eye openness appears within normal range.")
 
-            # ── Classify the captured frame using video model ──
             st.subheader("🎯 Behavior Classification (Single Frame)")
             video_model_cam, le_cam = load_video_model()
 
