@@ -3,9 +3,5 @@ numpy
 pandas
 scikit-learn
 joblib
-tensorflow
 opencv-python-headless
 mediapipe
-matplotlib
-seaborn
-imbalanced-learn
