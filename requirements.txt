@@ -1,6 +1,6 @@
 streamlit
 numpy
-panda
+pandas
 scikit-learn
 joblib
 tensorflow
