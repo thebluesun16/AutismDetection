@@ -1,7 +1,8 @@
 streamlit
-numpy
-tensorflow-cpu
-scikit-learn
-joblib
 opencv-python-headless
 mediapipe
+tensorflow-cpu
+joblib
+numpy
+scikit-learn
+pandas
