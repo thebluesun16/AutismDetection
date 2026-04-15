@@ -3,6 +3,8 @@ import numpy as np
 import joblib
 import tempfile
 import os
+import cv2   
+import mediapipe as mp
 
 # Resolve all model paths relative to this script, not the working directory.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
