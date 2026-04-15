@@ -39,6 +39,7 @@ def load_video_model():
         le    = joblib.load('video_label_encoder.pkl')
         return model, le
     except Exception as e:
+        st.warning(f"⚠️ video_model load error: {e}")
         return None, None
 
 @st.cache_resource
