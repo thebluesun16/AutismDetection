@@ -3,5 +3,5 @@ numpy
 tensorflow-cpu
 scikit-learn
 joblib
-opencv-python-headless
+opencv-python
 mediapipe
