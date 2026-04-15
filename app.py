@@ -31,16 +31,7 @@ def load_video_model():
     import traceback, os
     try:
         import tensorflow as tf
-        try:
-            # Try legacy H5 loader first (handles cross-version issues)
-            model = tf.keras.models.load_model('video_model.h5', compile=False)
-        except Exception:
-            # Fallback: load weights only via custom_objects workaround
-            model = tf.keras.models.load_model(
-                'video_model.h5',
-                compile=False,
-                options=tf.saved_model.LoadOptions(experimental_io_device='/job:localhost')
-            )
+        model = tf.keras.models.load_model('video_model.h5', compile=False)
         le = joblib.load('video_label_encoder.pkl')
         return model, le
     except Exception as e:
@@ -53,14 +44,11 @@ def load_cnnlstm_model():
     import traceback
     try:
         import tensorflow as tf
-        try:
+        # Try .keras format first (Keras 3), fallback to .h5
+        if os.path.exists('cnnlstm_model.keras'):
+            model = tf.keras.models.load_model('cnnlstm_model.keras', compile=False)
+        else:
             model = tf.keras.models.load_model('cnnlstm_model.h5', compile=False)
-        except Exception:
-            model = tf.keras.models.load_model(
-                'cnnlstm_model.h5',
-                compile=False,
-                options=tf.saved_model.LoadOptions(experimental_io_device='/job:localhost')
-            )
         le = joblib.load('cnnlstm_label_encoder.pkl')
         return model, le
     except Exception as e:
