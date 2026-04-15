@@ -1,6 +1,11 @@
 streamlit
 numpy
-joblib
+panda
 scikit-learn
+joblib
+tensorflow
 opencv-python-headless
-tensorflow-cpu
+mediapipe
+matplotlib
+seaborn
+imbalanced-learn
