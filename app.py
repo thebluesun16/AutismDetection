@@ -1,9 +1,16 @@
 import streamlit as st
+
+
+# Check for OpenCV installation immediately
+try:
+    import cv2
+except ImportError as e:
+    st.error(f"OpenCV failed to load: {e}. Please check packages.txt.")
+
 import numpy as np
 import joblib
 import tempfile
-import os
-import cv2   
+import os 
 import mediapipe as mp
 
 # Resolve all model paths relative to this script, not the working directory.
