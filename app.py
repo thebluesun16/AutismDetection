@@ -63,7 +63,7 @@ def load_all_models():
         video_le   = _path('video_label_encoder.pkl')
         if os.path.exists(video_path) and os.path.exists(video_le):
             try:
-                models['video']    = tf.keras.models.load_model(video_path, compile=False)
+                models['video']    = tf.keras.saving.load_model(video_path, compile=False)
                 models['video_le'] = joblib.load(video_le)
             except Exception as e:
                 st.warning(f"⚠️ Could not load video model: {e}")
@@ -86,8 +86,8 @@ def dsm5_clinical_score(a_scores, age, jaundice, family_history):
     if family_history == 1: risk_bonus += 1.0
     if age <= 10          : risk_bonus += 0.5
 
-    raw     = domain_a + domain_b + risk_bonus
-    score   = round(min(raw, 10), 1)
+    raw   = domain_a + domain_b + risk_bonus
+    score = round(min(raw, 10), 1)
 
     if score >= 6:   cat = "🔴 High DSM-5 Alignment (Likely ASD traits)"
     elif score >= 4: cat = "🟡 Moderate DSM-5 Alignment (Possible ASD traits)"
@@ -99,18 +99,14 @@ def dsm5_clinical_score(a_scores, age, jaundice, family_history):
 # EAR (Eye Aspect Ratio) ANALYSIS
 # ──────────────────────────────────────────────────────────
 def compute_ear(landmarks, eye_indices):
-    """Compute EAR for one eye using 6 mediapipe landmark indices."""
     pts = np.array([[landmarks[i].x, landmarks[i].y] for i in eye_indices])
-    # Vertical distances
     A = np.linalg.norm(pts[1] - pts[5])
     B = np.linalg.norm(pts[2] - pts[4])
-    # Horizontal distance
     C = np.linalg.norm(pts[0] - pts[3])
     return (A + B) / (2.0 * C + 1e-6)
 
-# MediaPipe FaceMesh eye landmark indices (left & right)
 LEFT_EYE  = [362, 385, 387, 263, 373, 380]
-RIGHT_EYE = [33,  160, 158,  133, 153, 144]
+RIGHT_EYE = [33,  160, 158, 133, 153, 144]
 
 def get_ear_analysis(video_path):
     if not CV2_AVAILABLE or not MP_AVAILABLE:
@@ -133,8 +129,8 @@ def get_ear_analysis(video_path):
             cap.release()
             return None, None, "Could not read video frames — check file format."
 
-        ear_values   = []
-        sample_idx   = np.linspace(0, total_frames - 1, min(30, total_frames), dtype=int)
+        ear_values = []
+        sample_idx = np.linspace(0, total_frames - 1, min(30, total_frames), dtype=int)
 
         for idx in sample_idx:
             cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
@@ -156,11 +152,9 @@ def get_ear_analysis(video_path):
         if not ear_values:
             return None, None, "No face detected in the video. Ensure the face is clearly visible."
 
-        avg_ear = float(np.mean(ear_values))
-        blink_frames = sum(1 for e in ear_values if e < 0.20)
-        blink_rate   = blink_frames / len(ear_values) * 100
-
-        status = "Normal Eye Contact" if avg_ear > 0.22 else "Reduced Eye Contact / Gaze Avoidance"
+        avg_ear    = float(np.mean(ear_values))
+        blink_rate = sum(1 for e in ear_values if e < 0.20) / len(ear_values) * 100
+        status     = "Normal Eye Contact" if avg_ear > 0.22 else "Reduced Eye Contact / Gaze Avoidance"
         return avg_ear, blink_rate, status
 
     except Exception as e:
@@ -170,7 +164,6 @@ def get_ear_analysis(video_path):
 # VIDEO MODEL PREDICTION
 # ──────────────────────────────────────────────────────────
 def predict_video_model(video_path, model, le):
-    """Extract frames, run through MobileNetV2 video model."""
     try:
         cap          = cv2.VideoCapture(video_path)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -184,13 +177,12 @@ def predict_video_model(video_path, model, le):
             if not ret:
                 continue
 
-            # Resize to model input (224×224 for MobileNetV2)
-            img    = cv2.resize(frame, (224, 224))
-            img    = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img    = img.astype(np.float32) / 255.0
-            img    = np.expand_dims(img, axis=0)
+            img = cv2.resize(frame, (224, 224))
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = img.astype(np.float32) / 255.0
+            img = np.expand_dims(img, axis=0)
 
-            pred   = model.predict(img, verbose=0)
+            pred = model.predict(img, verbose=0)
             frame_preds.append(pred[0])
 
         cap.release()
@@ -198,9 +190,9 @@ def predict_video_model(video_path, model, le):
         if not frame_preds:
             return None, None
 
-        avg_pred  = np.mean(frame_preds, axis=0)
-        class_idx = int(np.argmax(avg_pred))
-        label     = le.inverse_transform([class_idx])[0]
+        avg_pred   = np.mean(frame_preds, axis=0)
+        class_idx  = int(np.argmax(avg_pred))
+        label      = le.inverse_transform([class_idx])[0]
         confidence = float(avg_pred[class_idx]) * 100
         return label, confidence
 
@@ -218,11 +210,10 @@ tab1, tab2 = st.tabs(["📝 Questionnaire", "🎥 Video Analysis"])
 with tab1:
     st.subheader("AQ-10 Autism Screening Questionnaire")
     st.info("Answer each question honestly. This tool does **not** replace a clinical diagnosis.")
-
     st.markdown("**Answer 0 (Disagree / Rarely) or 1 (Agree / Often) for each question:**")
 
     questions = [
-        "Q1. I notice small sounds when others don't.",
+        "Q1. I notice small sounds when others do not.",
         "Q2. I find it hard to see the 'big picture' when looking at details.",
         "Q3. I find it easy to do more than one thing at once.",
         "Q4. If there is an interruption, I can switch back easily.",
@@ -244,7 +235,7 @@ with tab1:
     st.divider()
     col_a, col_b = st.columns(2)
     with col_a:
-        age = st.number_input("Age", min_value=2, max_value=100, value=25)
+        age    = st.number_input("Age", min_value=2, max_value=100, value=25)
     with col_b:
         gender = st.selectbox("Gender", ["Male", "Female", "Other"])
 
@@ -261,7 +252,6 @@ with tab1:
     if st.button("🔍 Predict ASD Risk", use_container_width=True):
         aq_total = sum(a_scores)
 
-        # ── DSM-5 score ──
         dom_a, dom_b, dsm5_score, dsm5_cat = dsm5_clinical_score(
             a_scores, age, jaundice_val, family_history_val
         )
@@ -270,19 +260,18 @@ with tab1:
         st.subheader("📊 Results")
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("AQ-10 Total Score", f"{aq_total} / 10")
+        col1.metric("AQ-10 Total Score",   f"{aq_total} / 10")
         col2.metric("DSM-5 Approx. Score", f"{dsm5_score} / 10")
-        col3.metric("Domain A (Social)", f"{dom_a} / 4")
+        col3.metric("Domain A (Social)",   f"{dom_a} / 4")
 
         st.markdown(f"**DSM-5 Category:** {dsm5_cat}")
 
-        # ── RF model prediction (if loaded) ──
         if 'rf' in models and 'scaler' in models:
             try:
-                # Feature vector matching training: A1–A10, age, jaundice, gender, family_history, result (aq_total)
-                features = np.array(a_scores + [age, jaundice_val, gender_val, family_history_val, aq_total]).reshape(1, -1)
+                features = np.array(
+                    a_scores + [age, jaundice_val, gender_val, family_history_val, aq_total]
+                ).reshape(1, -1)
 
-                # Try to match scaler's expected feature count
                 expected = models['scaler'].n_features_in_
                 if features.shape[1] < expected:
                     pad      = np.zeros((1, expected - features.shape[1]))
@@ -302,17 +291,15 @@ with tab1:
 
             except Exception as e:
                 st.warning(f"Model prediction failed: {e}")
-                # Fallback to rule-based
                 if aq_total >= 6:
                     st.error("🔴 **Rule-based: High ASD Risk** (AQ-10 ≥ 6)")
                 else:
                     st.success("🟢 **Rule-based: Low ASD Risk** (AQ-10 < 6)")
         else:
-            # Rule-based fallback when model files aren't present
             if aq_total >= 6:
-                st.error("🔴 **Screening Result: High ASD Risk** (AQ-10 ≥ 6 — model files not found, using AQ-10 threshold)")
+                st.error("🔴 **Screening Result: High ASD Risk** (AQ-10 ≥ 6)")
             else:
-                st.success("🟢 **Screening Result: Low ASD Risk** (AQ-10 < 6 — model files not found, using AQ-10 threshold)")
+                st.success("🟢 **Screening Result: Low ASD Risk** (AQ-10 < 6)")
 
         st.caption("⚠️ This is a research screening tool — NOT a clinical diagnosis.")
 
@@ -321,7 +308,7 @@ with tab1:
 # ══════════════════════════════════════════════════════════
 with tab2:
     st.subheader("Behavioral Video Analysis")
-    st.info("Upload a short video (5–30 sec) of the person in a social/play setting. The tool analyses eye contact and behavioral patterns.")
+    st.info("Upload a short video (5–30 sec) of the person in a social/play setting.")
 
     uploaded_file = st.file_uploader("Upload Video (.mp4 / .mov / .avi)", type=['mp4', 'mov', 'avi'])
 
@@ -331,14 +318,12 @@ with tab2:
         if st.button("▶️ Run AI Analysis", use_container_width=True):
             with st.spinner("Analysing video frames... please wait."):
 
-                # Save to temp file
-                suffix  = os.path.splitext(uploaded_file.name)[-1] or ".mp4"
-                tfile   = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                suffix     = os.path.splitext(uploaded_file.name)[-1] or ".mp4"
+                tfile      = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
                 tfile.write(uploaded_file.getbuffer())
                 tfile.flush()
                 video_path = tfile.name
 
-                # ── EAR / MediaPipe Analysis ──
                 avg_ear, blink_rate, ear_status = get_ear_analysis(video_path)
 
                 st.markdown("---")
@@ -346,9 +331,9 @@ with tab2:
 
                 if avg_ear is not None:
                     col1, col2, col3 = st.columns(3)
-                    col1.metric("Avg EAR Score",     f"{avg_ear:.3f}")
-                    col2.metric("Blink Rate",         f"{blink_rate:.1f}%")
-                    col3.metric("Gaze Status",        ear_status)
+                    col1.metric("Avg EAR Score", f"{avg_ear:.3f}")
+                    col2.metric("Blink Rate",    f"{blink_rate:.1f}%")
+                    col3.metric("Gaze Status",   ear_status)
 
                     if avg_ear > 0.25:
                         st.success("✅ Eye contact appears **normal**.")
@@ -359,7 +344,6 @@ with tab2:
                 else:
                     st.warning(f"EAR Analysis: {ear_status}")
 
-                # ── CNN Video Model ──
                 if 'video' in models and 'video_le' in models and CV2_AVAILABLE:
                     label, confidence = predict_video_model(video_path, models['video'], models['video_le'])
                     if label is not None:
@@ -369,7 +353,6 @@ with tab2:
                 elif 'video' not in models:
                     st.info("ℹ️ Video CNN model not loaded — showing EAR analysis only.")
 
-                # Cleanup
                 try:
                     os.unlink(video_path)
                 except Exception:
