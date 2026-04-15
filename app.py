@@ -1,23 +1,20 @@
 import streamlit as st
-
-
-# Check for OpenCV installation immediately
-try:
-    import cv2
-except ImportError as e:
-    st.error(f"OpenCV failed to load: {e}. Please check packages.txt.")
-
 import numpy as np
 import joblib
 import tempfile
-import os 
+import os
+import cv2
 import mediapipe as mp
+import tensorflow as tf
 
-# Resolve all model paths relative to this script, not the working directory.
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# ─────────────────────────────────────────
+# PATH HELPER
+# ─────────────────────────────────────────
+# Using getcwd() is more reliable on Streamlit Cloud for finding uploaded .h5/.pkl files
+BASE_DIR = os.getcwd()
 
 def _model_path(filename):
-    """Return the absolute path for a model file stored next to app.py."""
+    """Return the absolute path for a model file."""
     return os.path.join(BASE_DIR, filename)
 
 # ─────────────────────────────────────────
@@ -43,64 +40,41 @@ def load_questionnaire_models():
 
 @st.cache_resource
 def load_video_model():
-    """Load the CNN video model trained on SSBD dataset."""
-    import traceback
-    import tensorflow as tf
-
-    h5_path    = _model_path('video_model.h5')
-    keras_path = _model_path('video_model.keras')
-
-    # Try .h5 first (legacy format — most backward-compatible), then .keras
-    for path in [h5_path, keras_path]:
-        if os.path.exists(path) and os.path.getsize(path) > 1000:
-            try:
-                model = tf.keras.models.load_model(path, compile=False)
-                le = joblib.load(_model_path('video_label_encoder.pkl'))
-                return model, le
-            except Exception:
-                continue   # try next format
-
-    st.warning("⚠️ **video_model not found or could not be loaded.** "
-               "Please retrain it from the notebook (Section 6) and re-upload.")
+    """Load the CNN video model."""
+    h5_path = _model_path('video_model.h5')
+    if os.path.exists(h5_path):
+        try:
+            model = tf.keras.models.load_model(h5_path, compile=False)
+            le = joblib.load(_model_path('video_label_encoder.pkl'))
+            return model, le
+        except Exception as e:
+            st.error(f"Error loading video_model: {e}")
     return None, None
 
 @st.cache_resource
 def load_cnnlstm_model():
-    """Load the CNN-LSTM temporal model (new — Future Scope)."""
-    import traceback
-    import tensorflow as tf
-
-    h5_path    = _model_path('cnnlstm_model.h5')
-    keras_path = _model_path('cnnlstm_model.keras')
-
-    # Try .h5 first (legacy format — most backward-compatible), then .keras
-    for path in [h5_path, keras_path]:
-        if os.path.exists(path) and os.path.getsize(path) > 1000:
-            try:
-                model = tf.keras.models.load_model(path, compile=False)
-                le = joblib.load(_model_path('cnnlstm_label_encoder.pkl'))
-                return model, le
-            except Exception:
-                continue   # try next format
-
-    st.warning("⚠️ **cnnlstm_model not found or could not be loaded.** "
-               "Please retrain it from the notebook (Section 10) and re-upload.")
+    """Load the CNN-LSTM temporal model."""
+    h5_path = _model_path('cnnlstm_model.h5')
+    if os.path.exists(h5_path):
+        try:
+            model = tf.keras.models.load_model(h5_path, compile=False)
+            le = joblib.load(_model_path('cnnlstm_label_encoder.pkl'))
+            return model, le
+        except Exception as e:
+            st.error(f"Error loading cnnlstm_model: {e}")
     return None, None
 
-rf, scaler = load_questionnaire_models()
-
+# Initializing global models
+try:
+    rf, scaler = load_questionnaire_models()
+except Exception as e:
+    st.error("Questionnaire models (rf_model_smote.pkl/scaler.pkl) not found in root directory.")
 
 # ─────────────────────────────────────────
 # HELPER FUNCTIONS
 # ─────────────────────────────────────────
 
 def extract_frames_for_lstm(video_path, seq_len=10, img_size=224):
-    """
-    Extract exactly seq_len uniformly spaced frames from a video.
-    Used for the CNN-LSTM model that needs a fixed-length sequence.
-    Returns shape: (1, seq_len, 224, 224, 3) or None
-    """
-    import cv2  # lazy import
     cap = cv2.VideoCapture(video_path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if total < 5:
@@ -108,7 +82,7 @@ def extract_frames_for_lstm(video_path, seq_len=10, img_size=224):
         return None
 
     indices = np.linspace(0, total - 1, seq_len, dtype=int)
-    frames  = []
+    frames = []
     for idx in indices:
         cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
         ret, frame = cap.read()
@@ -122,28 +96,15 @@ def extract_frames_for_lstm(video_path, seq_len=10, img_size=224):
         return None
 
     arr = np.array(frames[:seq_len], dtype=np.float32) / 255.0
-    return arr[np.newaxis, ...]    # (1, seq_len, 224, 224, 3)
+    return arr[np.newaxis, ...] 
 
 
 def analyse_face_landmarks_from_frames(frames_rgb):
-    """
-    Runs MediaPipe face mesh on a list of RGB frames.
-    Returns average Eye Aspect Ratio (EAR) and an eye contact assessment.
-
-    MediaPipe eye landmark indices:
-      Left eye  : 362, 385, 387, 263, 373, 380
-      Right eye : 33,  160, 158, 133, 153, 144
-    """
-    try:
-        import mediapipe as mp
-    except ImportError:
-        return None   # MediaPipe not installed
-
     LEFT_EYE  = [362, 385, 387, 263, 373, 380]
     RIGHT_EYE = [33,  160, 158, 133, 153, 144]
 
     mp_face_mesh = mp.solutions.face_mesh
-    face_mesh    = mp_face_mesh.FaceMesh(
+    face_mesh = mp_face_mesh.FaceMesh(
         static_image_mode=True, max_num_faces=1,
         min_detection_confidence=0.5
     )
@@ -152,7 +113,7 @@ def analyse_face_landmarks_from_frames(frames_rgb):
     for frame in frames_rgb:
         results = face_mesh.process(frame)
         if results.multi_face_landmarks:
-            lm   = results.multi_face_landmarks[0].landmark
+            lm = results.multi_face_landmarks[0].landmark
             h, w = frame.shape[:2]
 
             def ear(eye_pts):
@@ -179,12 +140,6 @@ def analyse_face_landmarks_from_frames(frames_rgb):
 
 
 def dsm5_score(a_scores, age, jaundice, family_history):
-    """
-    Approximates DSM-5 clinical criteria using AQ-10 answers.
-    Domain A: Social communication (Q2, Q5, Q6, Q9)
-    Domain B: Restricted/repetitive behavior (Q1, Q7, Q8)
-    Returns a score out of 10 and a risk label.
-    """
     domain_a = a_scores[1] + a_scores[4] + a_scores[5] + a_scores[8]
     domain_b = a_scores[0] + a_scores[6] + a_scores[7]
     bonus    = (0.5 if jaundice == 1 else 0) + (1.0 if family_history == 1 else 0)
@@ -237,77 +192,56 @@ with tab1:
     age    = st.number_input("Age", min_value=5.0, max_value=100.0, value=30.0)
     gender = st.radio("Gender", ["Male", "Female"])
 
-    country_options = {
-        "India": 52, "United States": 1, "Canada": 30,
-        "UK": 51, "Australia": 12, "Other": 0
-    }
+    country_options = {"India": 52, "United States": 1, "Canada": 30, "UK": 51, "Australia": 12, "Other": 0}
     country_label  = st.selectbox("Country of residence", list(country_options.keys()))
     contry_of_res  = country_options[country_label]
 
-    relation_options = {
-        "Self": 1, "Parent": 2, "Relative": 3,
-        "Health professional": 4, "Other": 0
-    }
+    relation_options = {"Self": 1, "Parent": 2, "Relative": 3, "Health professional": 4, "Other": 0}
     relation_label = st.selectbox("Relation (who is answering?)", list(relation_options.keys()))
     relation       = relation_options[relation_label]
 
-    ethnicity_options = {
-        "Unknown": 0, "White-European": 1, "Middle Eastern": 2, "Pasifika": 3,
-        "Black": 4, "Others": 5, "Hispanic": 6, "Asian": 7,
-        "Turkish": 8, "South Asian": 9, "Latino": 10
-    }
+    ethnicity_options = {"Unknown": 0, "White-European": 1, "Middle Eastern": 2, "Pasifika": 3, "Black": 4, "Others": 5, "Hispanic": 6, "Asian": 7, "Turkish": 8, "South Asian": 9, "Latino": 10}
     ethnicity_label = st.selectbox("Ethnicity", list(ethnicity_options.keys()))
     ethnicity       = ethnicity_options[ethnicity_label]
 
     jaundice = st.radio("Born with Jaundice?", ["No", "Yes"])
     austim   = st.radio("Family history of autism?", ["No", "Yes"])
 
-    total_A_score     = sum(a_scores)
-    mean_A_score      = np.mean(a_scores)
-    std_A_score       = np.std(a_scores)
-    A_score_high_flag = 1 if total_A_score >= 6 else 0
-
-    answers = (
-        a_scores
-        + [age]
-        + [1 if gender == "Male" else 0]
-        + [int(ethnicity)]
-        + [1 if jaundice == "Yes" else 0]
-        + [1 if austim == "Yes" else 0]
-        + [contry_of_res]
-        + [relation]
-        + [total_A_score, mean_A_score, std_A_score, A_score_high_flag]
-    )
-
     if st.button("🔍 Predict ASD Risk", use_container_width=True):
-        data        = np.array([answers])
+        total_A_score = sum(a_scores)
+        mean_A_score  = np.mean(a_scores)
+        std_A_score   = np.std(a_scores)
+        A_score_high_flag = 1 if total_A_score >= 6 else 0
+
+        answers = a_scores + [age] + [1 if gender == "Male" else 0] + [int(ethnicity)] + \
+                  [1 if jaundice == "Yes" else 0] + [1 if austim == "Yes" else 0] + \
+                  [contry_of_res] + [relation] + \
+                  [total_A_score, mean_A_score, std_A_score, A_score_high_flag]
+
+        data = np.array([answers])
         data_scaled = scaler.transform(data)
-        pred        = rf.predict(data_scaled)[0]
-        prob        = rf.predict_proba(data_scaled)[0]
+        pred = rf.predict(data_scaled)[0]
+        prob = rf.predict_proba(data_scaled)[0]
 
         st.markdown("---")
         if pred == 1:
-            st.error(f"⚠️ **Result: ASD Traits Detected**  \nConfidence: {prob[1]*100:.1f}%")
+            st.error(f"⚠️ **Result: ASD Traits Detected** \nConfidence: {prob[1]*100:.1f}%")
         else:
-            st.success(f"✅ **Result: No ASD Traits Detected**  \nConfidence: {prob[0]*100:.1f}%")
+            st.success(f"✅ **Result: No ASD Traits Detected** \nConfidence: {prob[0]*100:.1f}%")
 
-        st.metric("Total AQ Score", total_A_score, help="Score ≥ 6 is associated with ASD traits")
-
+        st.metric("Total AQ Score", total_A_score)
+        
         st.markdown("---")
         st.subheader("🏥 DSM-5 Clinical Alignment Score")
-        st.caption("This maps your answers to real DSM-5 diagnostic criteria (research approximation only).")
-
         j_val = 1 if jaundice == "Yes" else 0
-        f_val = 1 if austim   == "Yes" else 0
+        f_val = 1 if austim == "Yes" else 0
         dom_a, dom_b, dsm_total, dsm_label = dsm5_score(a_scores, age, j_val, f_val)
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Domain A\n(Social Communication)", f"{dom_a}/4")
-        col2.metric("Domain B\n(Repetitive Behavior)", f"{dom_b}/3")
+        col1.metric("Domain A", f"{dom_a}/4")
+        col2.metric("Domain B", f"{dom_b}/3")
         col3.metric("DSM-5 Score", f"{dsm_total}/10")
         st.info(dsm_label)
-
-        st.caption("⚕️ This is not a medical diagnosis. Please consult a healthcare professional.")
 
 
 # ══════════════════════════════════════════
@@ -315,177 +249,68 @@ with tab1:
 # ══════════════════════════════════════════
 with tab2:
     st.header("Video-Based Behavior Analysis")
-    st.markdown("""
-    Upload a short video of the individual. Two models analyse the video:
-
-    | Model | What it does |
-    |---|---|
-    | **MobileNetV2** (original) | Classifies each frame separately |
-    | **CNN-LSTM** 🆕 | Captures motion patterns across a sequence of frames |
-
-    Detected behaviors: 🙌 Arm Flapping | 🤕 Head Banging | 🌀 Spinning
-    """)
-
-    uploaded_video = st.file_uploader(
-        "Upload a video file",
-        type=['mp4', 'avi', 'mov', 'mkv'],
-        help="Keep the video under 2 minutes for best performance."
-    )
+    uploaded_video = st.file_uploader("Upload a video file", type=['mp4', 'avi', 'mov', 'mkv'])
 
     if uploaded_video is not None:
         st.video(uploaded_video)
-        uploaded_video.seek(0)
-
-        video_model, le        = load_video_model()
+        video_model, le = load_video_model()
         cnnlstm_model, le_lstm = load_cnnlstm_model()
 
         if video_model is None and cnnlstm_model is None:
-            st.warning("""
-            ⚠️ **Video models not found.**
-            Please train them using the notebook (Sections 6 & 10) and place
-            `video_model.h5`, `cnnlstm_model.h5` and their label encoders alongside this app.
-            """)
+            st.warning("⚠️ Video models (.h5) or label encoders (.pkl) not found in directory.")
         else:
-            model_choice = st.radio(
-                "Choose model for analysis:",
-                ["MobileNetV2 (frame-by-frame)", "CNN-LSTM (temporal — recommended 🆕)"]
-            )
+            model_choice = st.radio("Choose model:", ["MobileNetV2 (frame-by-frame)", "CNN-LSTM (temporal)"])
 
             if st.button("🎬 Analyze Video", use_container_width=True):
-                with st.spinner("Extracting frames and analysing behavior..."):
-
-                    import cv2  # lazy import
-
+                with st.spinner("Analyzing..."):
                     tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
                     tfile.write(uploaded_video.read())
                     tfile.close()
 
-                    # ─── MobileNetV2 ───
                     if "MobileNetV2" in model_choice and video_model is not None:
-                        cap          = cv2.VideoCapture(tfile.name)
+                        cap = cv2.VideoCapture(tfile.name)
                         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                        n_samples    = min(30, max(10, total_frames // 10))
-                        indices      = np.linspace(0, total_frames - 1, n_samples, dtype=int)
-                        frames       = []
+                        indices = np.linspace(0, total_frames - 1, 20, dtype=int)
+                        frames = []
                         for idx in indices:
                             cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
                             ret, frame = cap.read()
                             if ret:
                                 frame = cv2.resize(frame, (224, 224))
-                                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                                frames.append(frame)
+                                frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                         cap.release()
 
                         if frames:
                             frames_array = np.array(frames, dtype=np.float32) / 255.0
-                            preds_all    = video_model.predict(frames_array, verbose=0)
-                            avg_probs    = preds_all.mean(axis=0)
-                            pred_idx     = np.argmax(avg_probs)
-                            pred_class   = le.inverse_transform([pred_idx])[0]
-                            confidence   = avg_probs[pred_idx] * 100
-                            frames_used  = len(frames)
-                            class_labels = le.classes_
+                            preds_all = video_model.predict(frames_array, verbose=0)
+                            avg_probs = preds_all.mean(axis=0)
+                            pred_idx = np.argmax(avg_probs)
+                            pred_class = le.inverse_transform([pred_idx])[0]
+                            confidence = avg_probs[pred_idx] * 100
+                            
+                            st.subheader("📊 Analysis Results")
+                            st.metric("Detected Behavior", pred_class.title())
+                            st.metric("Confidence", f"{confidence:.1f}%")
 
-                    # ─── CNN-LSTM ───
                     elif "CNN-LSTM" in model_choice and cnnlstm_model is not None:
                         seq = extract_frames_for_lstm(tfile.name, seq_len=10)
                         if seq is not None:
-                            preds_seq  = cnnlstm_model.predict(seq, verbose=0)
-                            avg_probs  = preds_seq[0]
-                            pred_idx   = np.argmax(avg_probs)
+                            preds_seq = cnnlstm_model.predict(seq, verbose=0)
+                            avg_probs = preds_seq[0]
+                            pred_idx = np.argmax(avg_probs)
                             pred_class = le_lstm.inverse_transform([pred_idx])[0]
-                            confidence = avg_probs[pred_idx] * 100
-                            frames_used = 10
-                            class_labels = le_lstm.classes_
-                        else:
-                            st.error("Could not read frames for CNN-LSTM. Try a different video.")
-                            os.unlink(tfile.name)
-                            st.stop()
-                    else:
-                        st.warning("Selected model not available. Please train it from the notebook.")
-                        os.unlink(tfile.name)
-                        st.stop()
+                            st.metric("Detected Behavior", pred_class.title())
+                            st.metric("Confidence", f"{avg_probs[pred_idx]*100:.1f}%")
 
-                    # ─── Results ───
-                    st.markdown("---")
-                    st.subheader("📊 Analysis Results")
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Detected Behavior", pred_class.replace('_', ' ').title())
-                    col2.metric("Confidence", f"{confidence:.1f}%")
-                    col3.metric("Frames Analyzed", frames_used)
-
-                    st.markdown("**Behavior Probability Distribution:**")
-                    for cls, prob in sorted(zip(class_labels, avg_probs), key=lambda x: -x[1]):
-                        label = cls.replace('_', ' ').title()
-                        st.progress(float(prob), text=f"{label}: {prob*100:.1f}%")
-
-                    # ─── MediaPipe Facial Analysis ───
-                    st.markdown("---")
-                    st.subheader("👁️ Facial Landmark Analysis (MediaPipe)")
-                    cap2   = cv2.VideoCapture(tfile.name)
-                    total2 = int(cap2.get(cv2.CAP_PROP_FRAME_COUNT))
-                    idxs2  = np.linspace(0, total2 - 1, 20, dtype=int)
-                    rgb_frames = []
-                    for idx in idxs2:
-                        cap2.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
-                        ret, frame = cap2.read()
-                        if ret:
-                            rgb_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                    # MediaPipe
+                    cap2 = cv2.VideoCapture(tfile.name)
+                    ret, frame_test = cap2.read()
+                    if ret:
+                        res = analyse_face_landmarks_from_frames([cv2.cvtColor(frame_test, cv2.COLOR_BGR2RGB)])
+                        st.metric("Avg Eye Aspect Ratio", res['avg_ear'])
+                        st.info(res['assessment'])
                     cap2.release()
-
-                    mp_result = analyse_face_landmarks_from_frames(rgb_frames)
-
-                    if mp_result is None:
-                        st.info("ℹ️ MediaPipe not installed. Run `pip install mediapipe` to enable facial analysis.")
-                    else:
-                        mcol1, mcol2 = st.columns(2)
-                        mcol1.metric("Avg Eye Aspect Ratio (EAR)", mp_result['avg_ear'],
-                                     help="Higher = eyes more open. Below 0.20 may indicate avoidance.")
-                        mcol2.metric("Frames with Face Detected", mp_result['faces_found'])
-                        if mp_result['avg_ear'] < 0.20 and mp_result['faces_found'] > 0:
-                            st.warning(f"⚠️ **{mp_result['assessment']}**  \n"
-                                       "EAR below 0.20 — eyes appear less open, which may indicate "
-                                       "gaze avoidance. This is one indicator assessed in autism screening.")
-                        elif mp_result['faces_found'] > 0:
-                            st.success(f"✅ **{mp_result['assessment']}**  \n"
-                                       f"EAR = {mp_result['avg_ear']} — eye openness appears normal.")
-                        else:
-                            st.info("No face detected in video frames.")
-
-                    # ─── ASD Risk interpretation ───
-                    st.markdown("---")
-                    stimming = ['arm_flapping', 'headbanging', 'spinning']
-                    if pred_class.lower() in stimming and confidence > 60:
-                        st.warning(f"⚠️ **Stimming behavior detected: {pred_class.replace('_', ' ').title()}**  \n"
-                                   "This behavior is commonly associated with ASD.  \n"
-                                   "Combine this with the questionnaire screening for a fuller picture.")
-                    else:
-                        st.success("✅ **No significant stimming behavior detected.**  \n"
-                                   "No prominent ASD-related motor behavior identified in this video.")
-
                     os.unlink(tfile.name)
-                    st.caption("⚕️ Research demonstration only. Consult a qualified medical professional for diagnosis.")
-
-    with st.expander("📥 How to obtain the SSBD video dataset & train the models"):
-        st.markdown("""
-        **SSBD — Self-Stimulatory Behaviour Dataset**
-
-        **Step 1 — Get the dataset:**
-        Visit https://rolandgoecke.net/research/datasets/ssbd/ and download videos.
-
-        **Step 2 — Folder structure:**
-        ```
-        ssbd_videos/
-          arm_flapping/  video1.mp4 ...
-          headbanging/   video1.mp4 ...
-          spinning/      video1.mp4 ...
-        ```
-
-        **Step 3 — Run the notebook:**
-        - Section 6 → saves `video_model.h5`
-        - Section 10 → saves `cnnlstm_model.h5`
-        Place all `.h5` and `.pkl` files next to this `app.py`.
-        """)
 
 
 # ══════════════════════════════════════════
@@ -493,81 +318,25 @@ with tab2:
 # ══════════════════════════════════════════
 with tab3:
     st.header("📷 Real-Time Webcam Detection")
-    st.info("""
-    **Future Scope Feature** — Capture a photo from your webcam and analyse it instantly.
-
-    This uses your device camera to:
-    - Detect **facial landmarks** (eye contact, expression) via MediaPipe
-    - Run **ASD behavior classification** on the captured frame
-    - Show **DSM-5 social domain score** based on facial features
-
-    > 💡 For a full video, use the **Video Behavior Analysis** tab.
-    """)
-
-    webcam_image = st.camera_input("📸 Take a photo for real-time analysis")
+    webcam_image = st.camera_input("Take a photo")
 
     if webcam_image is not None:
-        import cv2  # lazy import
-
         file_bytes = np.asarray(bytearray(webcam_image.read()), dtype=np.uint8)
-        img_bgr    = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        img_rgb    = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-
-        st.image(img_rgb, caption="Captured frame", use_column_width=True)
-        st.markdown("---")
-
-        with st.spinner("Analysing the captured image..."):
-
+        img_rgb = cv2.cvtColor(cv2.imdecode(file_bytes, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+        
+        with st.spinner("Analysing..."):
             mp_result = analyse_face_landmarks_from_frames([img_rgb])
-
-            st.subheader("👁️ Facial Landmark Analysis")
-            if mp_result is None:
-                st.warning("MediaPipe not installed. Run `pip install mediapipe` in your terminal.")
-            elif mp_result['faces_found'] == 0:
-                st.warning("⚠️ No face detected in this image. Please ensure the face is clearly visible.")
+            st.subheader("👁️ Facial Analysis")
+            if mp_result['faces_found'] > 0:
+                st.metric("Eye Aspect Ratio (EAR)", mp_result['avg_ear'])
+                st.success(mp_result['assessment'])
             else:
-                col1, col2 = st.columns(2)
-                col1.metric("Eye Aspect Ratio (EAR)", mp_result['avg_ear'],
-                            help="Above 0.20 = normal. Below 0.20 = possible gaze avoidance.")
-                col2.metric("EAR Interpretation", "Normal" if mp_result['avg_ear'] >= 0.20 else "Low")
+                st.warning("No face detected.")
 
-                if mp_result['avg_ear'] < 0.20:
-                    st.warning(f"⚠️ **{mp_result['assessment']}**  \n"
-                               "Low EAR detected — this may indicate eye contact avoidance, "
-                               "which is one of the social communication signs assessed in autism screening.")
-                else:
-                    st.success(f"✅ **{mp_result['assessment']}**  \n"
-                               "Eye openness appears within normal range.")
-
-            st.subheader("🎯 Behavior Classification (Single Frame)")
             video_model_cam, le_cam = load_video_model()
-
-            if video_model_cam is None:
-                st.info("ℹ️ Video model not loaded. Train it from Section 6 of the notebook.")
-            else:
+            if video_model_cam:
                 frame_resized = cv2.resize(img_rgb, (224, 224))
-                frame_norm    = np.array([frame_resized], dtype=np.float32) / 255.0
-                pred_probs    = video_model_cam.predict(frame_norm, verbose=0)[0]
-                pred_idx      = np.argmax(pred_probs)
-                pred_class    = le_cam.inverse_transform([pred_idx])[0]
-                confidence    = pred_probs[pred_idx] * 100
-
-                st.metric("Detected Behavior", pred_class.replace('_', ' ').title())
-                st.metric("Confidence", f"{confidence:.1f}%")
-
-                st.markdown("**All class probabilities:**")
-                for cls, prob in sorted(zip(le_cam.classes_, pred_probs), key=lambda x: -x[1]):
-                    st.progress(float(prob), text=f"{cls.replace('_',' ').title()}: {prob*100:.1f}%")
-
-                st.caption("⚠️ Single-frame classification is less accurate than full video analysis.")
-
-        st.markdown("---")
-        st.caption("⚕️ Real-time webcam analysis is a research demonstration. Always consult a qualified medical professional.")
-
-    st.markdown("""
-    ---
-    ### 📌 How to get better results with the webcam:
-    - Make sure the face is **well-lit** and clearly visible
-    - Look directly at the camera for eye contact analysis
-    - For **stimming behavior detection**, use the Video tab with a full clip instead
-    """)
+                frame_norm = np.array([frame_resized], dtype=np.float32) / 255.0
+                pred_probs = video_model_cam.predict(frame_norm, verbose=0)[0]
+                pred_idx = np.argmax(pred_probs)
+                st.metric("Behavior", le_cam.inverse_transform([pred_idx])[0].title())
