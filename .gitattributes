@@ -1,0 +1,4 @@
+# Treat model and data files as binary — prevent Git from corrupting them
+*.h5 binary
+*.keras binary
+*.pkl binary
