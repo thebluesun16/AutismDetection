@@ -6,4 +6,4 @@ Autism Spectrum Disorder (ASD) is a developmental condition that affects communi
 Objective:
 Use AI and ML to automate and improve screening through combined questionnaire data and behavioral video analysis for accurate, accessible autism detection.
 
-STREAMLIT LINK: https://autismdetection-9hgpxtxhxqfyt7dyrke4ms.streamlit.app/
+STREAMLIT LINK: https://autismdetection-vwjswpip43y29wge5vh9ye.streamlit.app/
