@@ -26,6 +26,34 @@ except ImportError:
     TF_AVAILABLE = False
 
 # ──────────────────────────────────────────────────────────
+# KERAS COMPATIBILITY PATCH
+# ──────────────────────────────────────────────────────────
+if TF_AVAILABLE:
+    from tensorflow.keras.layers import Dense as _OrigDense
+    from tensorflow.keras.layers import Conv2D as _OrigConv2D
+    from tensorflow.keras.layers import LSTM as _OrigLSTM
+
+    class _CompatDense(_OrigDense):
+        def __init__(self, *args, quantization_config=None, **kwargs):
+            super().__init__(*args, **kwargs)
+
+    class _CompatConv2D(_OrigConv2D):
+        def __init__(self, *args, quantization_config=None, **kwargs):
+            super().__init__(*args, **kwargs)
+
+    class _CompatLSTM(_OrigLSTM):
+        def __init__(self, *args, quantization_config=None, **kwargs):
+            super().__init__(*args, **kwargs)
+
+    COMPAT_OBJECTS = {
+        'Dense':  _CompatDense,
+        'Conv2D': _CompatConv2D,
+        'LSTM':   _CompatLSTM,
+    }
+else:
+    COMPAT_OBJECTS = {}
+
+# ──────────────────────────────────────────────────────────
 # PAGE CONFIG
 # ──────────────────────────────────────────────────────────
 st.set_page_config(page_title="Autism Screening Tool", page_icon="🧠", layout="centered")
@@ -59,7 +87,7 @@ def load_all_models():
 
     # --- Video model ---
     if TF_AVAILABLE:
-        video_keras = _path('video_model.keras')   # prefer .keras format
+        video_keras = _path('video_model.keras')
         video_h5    = _path('video_model.h5')
         video_le    = _path('video_label_encoder.pkl')
 
@@ -67,7 +95,11 @@ def load_all_models():
 
         if os.path.exists(video_path) and os.path.exists(video_le):
             try:
-                models['video']    = tf.keras.models.load_model(video_path, compile=False)
+                models['video']    = tf.keras.models.load_model(
+                                         video_path,
+                                         compile=False,
+                                         custom_objects=COMPAT_OBJECTS
+                                     )
                 models['video_le'] = joblib.load(video_le)
             except Exception as e:
                 st.warning(f"⚠️ Could not load video model: {e}")
@@ -79,16 +111,16 @@ def load_all_models():
 models = load_all_models()
 
 # ──────────────────────────────────────────────────────────
-# DSM-5 SCORING FUNCTION (from notebook)
+# DSM-5 SCORING FUNCTION
 # ──────────────────────────────────────────────────────────
 def dsm5_clinical_score(a_scores, age, jaundice, family_history):
     domain_a = a_scores[1] + a_scores[4] + a_scores[5] + a_scores[8]
     domain_b = a_scores[0] + a_scores[6] + a_scores[7]
 
     risk_bonus = 0
-    if jaundice      == 1: risk_bonus += 0.5
+    if jaundice       == 1: risk_bonus += 0.5
     if family_history == 1: risk_bonus += 1.0
-    if age <= 10          : risk_bonus += 0.5
+    if age <= 10           : risk_bonus += 0.5
 
     raw   = domain_a + domain_b + risk_bonus
     score = round(min(raw, 10), 1)
@@ -274,92 +306,4 @@ with tab1:
             try:
                 features = np.array(
                     a_scores + [age, jaundice_val, gender_val, family_history_val, aq_total]
-                ).reshape(1, -1)
-
-                expected = models['scaler'].n_features_in_
-                if features.shape[1] < expected:
-                    pad      = np.zeros((1, expected - features.shape[1]))
-                    features = np.hstack([features, pad])
-                elif features.shape[1] > expected:
-                    features = features[:, :expected]
-
-                features_scaled = models['scaler'].transform(features)
-                pred            = models['rf'].predict(features_scaled)[0]
-                proba           = models['rf'].predict_proba(features_scaled)[0]
-                confidence      = round(float(max(proba)) * 100, 1)
-
-                if pred == 1:
-                    st.error(f"🔴 **Model Prediction: High ASD Risk** ({confidence}% confidence)")
-                else:
-                    st.success(f"🟢 **Model Prediction: Low ASD Risk** ({confidence}% confidence)")
-
-            except Exception as e:
-                st.warning(f"Model prediction failed: {e}")
-                if aq_total >= 6:
-                    st.error("🔴 **Rule-based: High ASD Risk** (AQ-10 ≥ 6)")
-                else:
-                    st.success("🟢 **Rule-based: Low ASD Risk** (AQ-10 < 6)")
-        else:
-            if aq_total >= 6:
-                st.error("🔴 **Screening Result: High ASD Risk** (AQ-10 ≥ 6)")
-            else:
-                st.success("🟢 **Screening Result: Low ASD Risk** (AQ-10 < 6)")
-
-        st.caption("⚠️ This is a research screening tool — NOT a clinical diagnosis.")
-
-# ══════════════════════════════════════════════════════════
-# TAB 2 — VIDEO ANALYSIS
-# ══════════════════════════════════════════════════════════
-with tab2:
-    st.subheader("Behavioral Video Analysis")
-    st.info("Upload a short video (5–30 sec) of the person in a social/play setting.")
-
-    uploaded_file = st.file_uploader("Upload Video (.mp4 / .mov / .avi)", type=['mp4', 'mov', 'avi'])
-
-    if uploaded_file:
-        st.video(uploaded_file)
-
-        if st.button("▶️ Run AI Analysis", use_container_width=True):
-            with st.spinner("Analysing video frames... please wait."):
-
-                suffix     = os.path.splitext(uploaded_file.name)[-1] or ".mp4"
-                tfile      = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                tfile.write(uploaded_file.getbuffer())
-                tfile.flush()
-                video_path = tfile.name
-
-                avg_ear, blink_rate, ear_status = get_ear_analysis(video_path)
-
-                st.markdown("---")
-                st.subheader("📊 Analysis Results")
-
-                if avg_ear is not None:
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Avg EAR Score", f"{avg_ear:.3f}")
-                    col2.metric("Blink Rate",    f"{blink_rate:.1f}%")
-                    col3.metric("Gaze Status",   ear_status)
-
-                    if avg_ear > 0.25:
-                        st.success("✅ Eye contact appears **normal**.")
-                    elif avg_ear > 0.18:
-                        st.warning("⚠️ **Reduced** eye contact detected.")
-                    else:
-                        st.error("🔴 **Significant gaze avoidance** detected.")
-                else:
-                    st.warning(f"EAR Analysis: {ear_status}")
-
-                if 'video' in models and 'video_le' in models and CV2_AVAILABLE:
-                    label, confidence = predict_video_model(video_path, models['video'], models['video_le'])
-                    if label is not None:
-                        st.markdown(f"**CNN Model Prediction:** `{label}` — {confidence:.1f}% confidence")
-                    else:
-                        st.warning("CNN model could not process the video frames.")
-                elif 'video' not in models:
-                    st.info("ℹ️ Video CNN model not loaded — showing EAR analysis only.")
-
-                try:
-                    os.unlink(video_path)
-                except Exception:
-                    pass
-
-        st.caption("⚠️ This tool is for research purposes only and does not constitute a medical diagnosis.")
+                ).reshape(1,
