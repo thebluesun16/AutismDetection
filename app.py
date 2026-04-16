@@ -59,20 +59,20 @@ def load_all_models():
 
     # --- Video model ---
     if TF_AVAILABLE:
-    video_keras = _path('video_model.keras')   # prefer .keras format
-    video_h5    = _path('video_model.h5')
-    video_le    = _path('video_label_encoder.pkl')
+        video_keras = _path('video_model.keras')   # prefer .keras format
+        video_h5    = _path('video_model.h5')
+        video_le    = _path('video_label_encoder.pkl')
 
-    video_path = video_keras if os.path.exists(video_keras) else video_h5
+        video_path = video_keras if os.path.exists(video_keras) else video_h5
 
-    if os.path.exists(video_path) and os.path.exists(video_le):
-        try:
-            models['video']    = tf.keras.models.load_model(video_path, compile=False)
-            models['video_le'] = joblib.load(video_le)
-        except Exception as e:
-            st.warning(f"⚠️ Could not load video model: {e}")
-    else:
-        st.warning("⚠️ video_model (.keras or .h5) or video_label_encoder.pkl not found.")
+        if os.path.exists(video_path) and os.path.exists(video_le):
+            try:
+                models['video']    = tf.keras.models.load_model(video_path, compile=False)
+                models['video_le'] = joblib.load(video_le)
+            except Exception as e:
+                st.warning(f"⚠️ Could not load video model: {e}")
+        else:
+            st.warning("⚠️ video_model (.keras or .h5) or video_label_encoder.pkl not found.")
 
     return models
 
