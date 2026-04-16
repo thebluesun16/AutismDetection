@@ -306,4 +306,92 @@ with tab1:
             try:
                 features = np.array(
                     a_scores + [age, jaundice_val, gender_val, family_history_val, aq_total]
-                ).reshape(1,
+                ).reshape(1, -1)
+
+                expected = models['scaler'].n_features_in_
+                if features.shape[1] < expected:
+                    pad      = np.zeros((1, expected - features.shape[1]))
+                    features = np.hstack([features, pad])
+                elif features.shape[1] > expected:
+                    features = features[:, :expected]
+
+                features_scaled = models['scaler'].transform(features)
+                pred            = models['rf'].predict(features_scaled)[0]
+                proba           = models['rf'].predict_proba(features_scaled)[0]
+                confidence      = round(float(max(proba)) * 100, 1)
+
+                if pred == 1:
+                    st.error(f"🔴 **Model Prediction: High ASD Risk** ({confidence}% confidence)")
+                else:
+                    st.success(f"🟢 **Model Prediction: Low ASD Risk** ({confidence}% confidence)")
+
+            except Exception as e:
+                st.warning(f"Model prediction failed: {e}")
+                if aq_total >= 6:
+                    st.error("🔴 **Rule-based: High ASD Risk** (AQ-10 ≥ 6)")
+                else:
+                    st.success("🟢 **Rule-based: Low ASD Risk** (AQ-10 < 6)")
+        else:
+            if aq_total >= 6:
+                st.error("🔴 **Screening Result: High ASD Risk** (AQ-10 ≥ 6)")
+            else:
+                st.success("🟢 **Screening Result: Low ASD Risk** (AQ-10 < 6)")
+
+        st.caption("⚠️ This is a research screening tool — NOT a clinical diagnosis.")
+
+# ══════════════════════════════════════════════════════════
+# TAB 2 — VIDEO ANALYSIS
+# ══════════════════════════════════════════════════════════
+with tab2:
+    st.subheader("Behavioral Video Analysis")
+    st.info("Upload a short video (5–30 sec) of the person in a social/play setting.")
+
+    uploaded_file = st.file_uploader("Upload Video (.mp4 / .mov / .avi)", type=['mp4', 'mov', 'avi'])
+
+    if uploaded_file:
+        st.video(uploaded_file)
+
+        if st.button("▶️ Run AI Analysis", use_container_width=True):
+            with st.spinner("Analysing video frames... please wait."):
+
+                suffix     = os.path.splitext(uploaded_file.name)[-1] or ".mp4"
+                tfile      = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                tfile.write(uploaded_file.getbuffer())
+                tfile.flush()
+                video_path = tfile.name
+
+                avg_ear, blink_rate, ear_status = get_ear_analysis(video_path)
+
+                st.markdown("---")
+                st.subheader("📊 Analysis Results")
+
+                if avg_ear is not None:
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Avg EAR Score", f"{avg_ear:.3f}")
+                    col2.metric("Blink Rate",    f"{blink_rate:.1f}%")
+                    col3.metric("Gaze Status",   ear_status)
+
+                    if avg_ear > 0.25:
+                        st.success("✅ Eye contact appears **normal**.")
+                    elif avg_ear > 0.18:
+                        st.warning("⚠️ **Reduced** eye contact detected.")
+                    else:
+                        st.error("🔴 **Significant gaze avoidance** detected.")
+                else:
+                    st.warning(f"EAR Analysis: {ear_status}")
+
+                if 'video' in models and 'video_le' in models and CV2_AVAILABLE:
+                    label, confidence = predict_video_model(video_path, models['video'], models['video_le'])
+                    if label is not None:
+                        st.markdown(f"**CNN Model Prediction:** `{label}` — {confidence:.1f}% confidence")
+                    else:
+                        st.warning("CNN model could not process the video frames.")
+                elif 'video' not in models:
+                    st.info("ℹ️ Video CNN model not loaded — showing EAR analysis only.")
+
+                try:
+                    os.unlink(video_path)
+                except Exception:
+                    pass
+
+        st.caption("⚠️ This tool is for research purposes only and does not constitute a medical diagnosis.")
