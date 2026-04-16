@@ -479,7 +479,7 @@ with tab2:
                     if avg_ear > 0.25:
                         st.success("✅ Eye contact appears **normal**.")
                     elif avg_ear > 0.18:
-                        st.warning("⚠️ **Reduced** eye contact detected.")
+                        st.warning("⚠️ **Reduce**")
                     else:
                         st.error("🔴 **Significant gaze avoidance** detected.")
 
