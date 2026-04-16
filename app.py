@@ -85,7 +85,7 @@ def load_all_models():
     else:
         st.warning("⚠️ rf_model_smote.pkl or scaler.pkl not found in repo root.")
 
-    # --- Video model ---
+    # --- Video model (MobileNetV2 frame-by-frame) ---
     if TF_AVAILABLE:
         video_keras = _path('video_model.keras')
         video_h5    = _path('video_model.h5')
@@ -105,6 +105,23 @@ def load_all_models():
                 st.warning(f"⚠️ Could not load video model: {e}")
         else:
             st.warning("⚠️ video_model (.keras or .h5) or video_label_encoder.pkl not found.")
+
+        # --- CNN-LSTM model (temporal patterns) ---
+        cnnlstm_h5 = _path('cnnlstm_model.h5')
+        cnnlstm_le = _path('cnnlstm_label_encoder.pkl')
+
+        if os.path.exists(cnnlstm_h5) and os.path.exists(cnnlstm_le):
+            try:
+                models['cnnlstm']    = tf.keras.models.load_model(
+                                           cnnlstm_h5,
+                                           compile=False,
+                                           custom_objects=COMPAT_OBJECTS
+                                       )
+                models['cnnlstm_le'] = joblib.load(cnnlstm_le)
+            except Exception as e:
+                st.warning(f"⚠️ Could not load CNN-LSTM model: {e}")
+        else:
+            st.info("ℹ️ cnnlstm_model.h5 not found — temporal analysis will be skipped.")
 
     return models
 
@@ -132,7 +149,7 @@ def dsm5_clinical_score(a_scores, age, jaundice, family_history):
     return domain_a, domain_b, score, cat
 
 # ──────────────────────────────────────────────────────────
-# EAR (Eye Aspect Ratio) ANALYSIS
+# EAR + MAR ANALYSIS  (Eye & Mouth Aspect Ratios)
 # ──────────────────────────────────────────────────────────
 def compute_ear(landmarks, eye_indices):
     pts = np.array([[landmarks[i].x, landmarks[i].y] for i in eye_indices])
@@ -141,12 +158,24 @@ def compute_ear(landmarks, eye_indices):
     C = np.linalg.norm(pts[0] - pts[3])
     return (A + B) / (2.0 * C + 1e-6)
 
+def compute_mar(landmarks, mouth_indices):
+    """
+    Mouth Aspect Ratio using 4 key mouth landmarks.
+    High MAR → mouth open; low MAR → mouth closed.
+    Unusual or frozen MAR can indicate atypical expression patterns.
+    """
+    pts = np.array([[landmarks[i].x, landmarks[i].y] for i in mouth_indices])
+    vert  = np.linalg.norm(pts[0] - pts[1])   # top-to-bottom
+    horiz = np.linalg.norm(pts[2] - pts[3])   # left-to-right
+    return vert / (horiz + 1e-6)
+
 LEFT_EYE  = [362, 385, 387, 263, 373, 380]
 RIGHT_EYE = [33,  160, 158, 133, 153, 144]
+MOUTH     = [13,  14,  78,  308]   # top-lip, bottom-lip, left-corner, right-corner
 
-def get_ear_analysis(video_path):
+def get_ear_mar_analysis(video_path):
     if not CV2_AVAILABLE or not MP_AVAILABLE:
-        return None, None, "OpenCV / MediaPipe not available in this environment."
+        return None, None, None, "OpenCV / MediaPipe not available in this environment."
 
     try:
         mp_face_mesh = mp.solutions.face_mesh
@@ -163,9 +192,10 @@ def get_ear_analysis(video_path):
 
         if total_frames == 0:
             cap.release()
-            return None, None, "Could not read video frames — check file format."
+            return None, None, None, "Could not read video frames — check file format."
 
         ear_values = []
+        mar_values = []
         sample_idx = np.linspace(0, total_frames - 1, min(30, total_frames), dtype=int)
 
         for idx in sample_idx:
@@ -180,24 +210,27 @@ def get_ear_analysis(video_path):
             if results.multi_face_landmarks:
                 lm  = results.multi_face_landmarks[0].landmark
                 ear = (compute_ear(lm, LEFT_EYE) + compute_ear(lm, RIGHT_EYE)) / 2.0
+                mar = compute_mar(lm, MOUTH)
                 ear_values.append(ear)
+                mar_values.append(mar)
 
         cap.release()
         face_mesh.close()
 
         if not ear_values:
-            return None, None, "No face detected in the video. Ensure the face is clearly visible."
+            return None, None, None, "No face detected in the video. Ensure the face is clearly visible."
 
         avg_ear    = float(np.mean(ear_values))
+        avg_mar    = float(np.mean(mar_values))
         blink_rate = sum(1 for e in ear_values if e < 0.20) / len(ear_values) * 100
         status     = "Normal Eye Contact" if avg_ear > 0.22 else "Reduced Eye Contact / Gaze Avoidance"
-        return avg_ear, blink_rate, status
+        return avg_ear, avg_mar, blink_rate, status
 
     except Exception as e:
-        return None, None, f"Analysis error: {e}"
+        return None, None, None, f"Analysis error: {e}"
 
 # ──────────────────────────────────────────────────────────
-# VIDEO MODEL PREDICTION
+# VIDEO MODEL PREDICTION  (MobileNetV2 — frame-by-frame)
 # ──────────────────────────────────────────────────────────
 def predict_video_model(video_path, model, le):
     try:
@@ -230,6 +263,66 @@ def predict_video_model(video_path, model, le):
         class_idx  = int(np.argmax(avg_pred))
         label      = le.inverse_transform([class_idx])[0]
         confidence = float(avg_pred[class_idx]) * 100
+        return label, confidence
+
+    except Exception as e:
+        return None, None
+
+# ──────────────────────────────────────────────────────────
+# CNN-LSTM MODEL PREDICTION  (temporal sequence)
+# ──────────────────────────────────────────────────────────
+def predict_cnnlstm_model(video_path, model, le):
+    """
+    CNN-LSTM expects a sequence of frames as input: (1, n_frames, H, W, 3).
+    Matches the training approach from Section 10 of the notebook.
+    """
+    try:
+        cap          = cv2.VideoCapture(video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        if total_frames == 0:
+            cap.release()
+            return None, None
+
+        # Determine expected sequence length from model input shape
+        # Model input: (None, timesteps, H, W, C)
+        try:
+            n_frames = model.input_shape[1]   # timesteps dimension
+            img_size = model.input_shape[2]   # spatial H
+        except Exception:
+            n_frames = 20
+            img_size = 224
+
+        sample_idx = np.linspace(0, total_frames - 1, n_frames, dtype=int)
+        frames = []
+
+        for idx in sample_idx:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
+            ret, frame = cap.read()
+            if not ret:
+                # Pad with a blank frame if read fails
+                frames.append(np.zeros((img_size, img_size, 3), dtype=np.float32))
+                continue
+
+            frame = cv2.resize(frame, (img_size, img_size))
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(frame.astype(np.float32) / 255.0)
+
+        cap.release()
+
+        if len(frames) < 2:
+            return None, None
+
+        # Pad or trim to exactly n_frames
+        while len(frames) < n_frames:
+            frames.append(np.zeros((img_size, img_size, 3), dtype=np.float32))
+        frames = frames[:n_frames]
+
+        seq        = np.expand_dims(np.array(frames), axis=0)   # (1, n_frames, H, W, 3)
+        pred       = model.predict(seq, verbose=0)[0]
+        class_idx  = int(np.argmax(pred))
+        label      = le.inverse_transform([class_idx])[0]
+        confidence = float(pred[class_idx]) * 100
         return label, confidence
 
     except Exception as e:
@@ -295,17 +388,26 @@ with tab1:
         st.markdown("---")
         st.subheader("📊 Results")
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("AQ-10 Total Score",   f"{aq_total} / 10")
-        col2.metric("DSM-5 Approx. Score", f"{dsm5_score} / 10")
-        col3.metric("Domain A (Social)",   f"{dom_a} / 4")
+        # --- FIX: Show Domain B score too (was missing from original) ---
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("AQ-10 Total Score",    f"{aq_total} / 10")
+        col2.metric("DSM-5 Approx. Score",  f"{dsm5_score} / 10")
+        col3.metric("Domain A (Social)",    f"{dom_a} / 4")
+        col4.metric("Domain B (Behaviour)", f"{dom_b} / 3")
 
         st.markdown(f"**DSM-5 Category:** {dsm5_cat}")
 
         if 'rf' in models and 'scaler' in models:
             try:
+                # --- Feature engineering to match notebook training ---
+                a_arr         = np.array(a_scores)
+                mean_a        = float(a_arr.mean())
+                std_a         = float(a_arr.std())
+                high_flag     = int(aq_total >= 6)
+
                 features = np.array(
-                    a_scores + [age, jaundice_val, gender_val, family_history_val, aq_total]
+                    a_scores + [age, jaundice_val, gender_val, family_history_val,
+                                aq_total, mean_a, std_a, high_flag]
                 ).reshape(1, -1)
 
                 expected = models['scaler'].n_features_in_
@@ -360,16 +462,19 @@ with tab2:
                 tfile.flush()
                 video_path = tfile.name
 
-                avg_ear, blink_rate, ear_status = get_ear_analysis(video_path)
+                # --- EAR + MAR analysis ---
+                avg_ear, avg_mar, blink_rate, ear_status = get_ear_mar_analysis(video_path)
 
                 st.markdown("---")
                 st.subheader("📊 Analysis Results")
 
+                # ── Eye & Mouth metrics ──
                 if avg_ear is not None:
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Avg EAR Score", f"{avg_ear:.3f}")
-                    col2.metric("Blink Rate",    f"{blink_rate:.1f}%")
-                    col3.metric("Gaze Status",   ear_status)
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Avg EAR Score",  f"{avg_ear:.3f}")
+                    col2.metric("Avg MAR Score",  f"{avg_mar:.3f}")
+                    col3.metric("Blink Rate",     f"{blink_rate:.1f}%")
+                    col4.metric("Gaze Status",    ear_status)
 
                     if avg_ear > 0.25:
                         st.success("✅ Eye contact appears **normal**.")
@@ -377,17 +482,50 @@ with tab2:
                         st.warning("⚠️ **Reduced** eye contact detected.")
                     else:
                         st.error("🔴 **Significant gaze avoidance** detected.")
-                else:
-                    st.warning(f"EAR Analysis: {ear_status}")
 
-                if 'video' in models and 'video_le' in models and CV2_AVAILABLE:
-                    label, confidence = predict_video_model(video_path, models['video'], models['video_le'])
-                    if label is not None:
-                        st.markdown(f"**CNN Model Prediction:** `{label}` — {confidence:.1f}% confidence")
+                    # MAR interpretation
+                    if avg_mar < 0.05:
+                        st.info("👄 Mouth mostly closed — limited facial expression detected.")
+                    elif avg_mar > 0.30:
+                        st.warning("👄 Mouth frequently open — possible atypical expression pattern.")
                     else:
-                        st.warning("CNN model could not process the video frames.")
+                        st.success("👄 Mouth expression appears within typical range.")
+
+                else:
+                    st.warning(f"EAR/MAR Analysis: {ear_status}")
+
+                st.divider()
+
+                # ── MobileNetV2 frame-by-frame prediction ──
+                if 'video' in models and 'video_le' in models and CV2_AVAILABLE:
+                    with st.spinner("Running MobileNetV2 frame analysis..."):
+                        label, confidence = predict_video_model(
+                            video_path, models['video'], models['video_le']
+                        )
+                    if label is not None:
+                        st.markdown(f"**🖼️ MobileNetV2 Prediction:** `{label}` — {confidence:.1f}% confidence")
+                    else:
+                        st.warning("MobileNetV2 model could not process the video frames.")
                 elif 'video' not in models:
-                    st.info("ℹ️ Video CNN model not loaded — showing EAR analysis only.")
+                    st.info("ℹ️ MobileNetV2 model not loaded — showing EAR/MAR analysis only.")
+
+                # ── CNN-LSTM temporal prediction ──
+                if 'cnnlstm' in models and 'cnnlstm_le' in models and CV2_AVAILABLE:
+                    with st.spinner("Running CNN-LSTM temporal analysis..."):
+                        cnnlstm_label, cnnlstm_conf = predict_cnnlstm_model(
+                            video_path, models['cnnlstm'], models['cnnlstm_le']
+                        )
+                    if cnnlstm_label is not None:
+                        st.markdown(
+                            f"**🎬 CNN-LSTM Temporal Prediction:** `{cnnlstm_label}` "
+                            f"— {cnnlstm_conf:.1f}% confidence"
+                        )
+                        st.caption(
+                            "CNN-LSTM analyses motion patterns across the full video sequence "
+                            "(arm flapping, headbanging, spinning)."
+                        )
+                    else:
+                        st.warning("CNN-LSTM model could not process the video sequence.")
 
                 try:
                     os.unlink(video_path)
